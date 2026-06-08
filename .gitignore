@@ -1,0 +1,17 @@
+venv
+.env
+.idea
+.env.example
+frontend/node_modules
+chroma_data
+demo
+docs
+目录树.md
+项目架构.md
+AI Auto-ETL 智能报表平台需求文档 .md
+chroma.log
+demo_proxy.py
+docker-compose.yml
+requirements.txt
+start_proxy.bat
+start_proxy.sh

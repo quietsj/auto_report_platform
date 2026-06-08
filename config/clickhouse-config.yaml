@@ -1,0 +1,5 @@
+host: localhost
+port: 8123
+user: default
+password:
+database: default
