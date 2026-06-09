@@ -1,28 +1,11 @@
+api_base: http://172.29.88.141:4000/v1
+
 model_list:
-  - model_name: deepseek-chat
+  - model_name: gpt-3.5-turbo
     litellm_params:
-      model: deepseek/deepseek-chat
-      api_key: os.environ/DEEPSEEK_API_KEY
-      api_base: https://api.deepseek.com
-      
-  - model_name: deepseek-coder
-    litellm_params:
-      model: deepseek/deepseek-chat
-      api_key: os.environ/DEEPSEEK_API_KEY
-      api_base: https://api.deepseek.com
-      
-  - model_name: qwen-turbo
-    litellm_params:
-      model: openai/qwen-turbo
-      api_key: os.environ/DASHSCOPE_API_KEY
-      api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+      model: gpt-3.5-turbo
+      api_key: sk-litellm-local-test
 
 general_settings:
-  master_key: os.environ/LITELLM_MASTER_KEY
+  master_key: sk-litellm-local-test
   litellm_call_id: true
-  cache: true
-  cache_config:
-    type: redis
-  redis_host: localhost
-  redis_port: 6379
-  redis_password: os.environ/REDIS_PASSWORD

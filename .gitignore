@@ -15,3 +15,7 @@ docker-compose.yml
 requirements.txt
 start_proxy.bat
 start_proxy.sh
+.trae/specs
+frontend/.vite
+scripts
+config

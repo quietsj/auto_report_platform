@@ -1,26 +1,33 @@
-import { Layout, Menu, theme } from 'antd'
+import { Layout, Menu } from 'antd'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { DashboardOutlined, CodeOutlined, SettingOutlined } from '@ant-design/icons'
+import { DashboardOutlined, CodeOutlined, SettingOutlined, ThunderboltOutlined, BarChartOutlined } from '@ant-design/icons'
 
-const { Header, Sider, Content } = Layout
+const { Sider, Content } = Layout
 
 const MainLayout = () => {
   const navigate = useNavigate()
   const location = useLocation()
-  const {
-    token: { colorBgContainer, borderRadiusLG },
-  } = theme.useToken()
 
   const menuItems = [
     {
+      key: '/report',
+      icon: <BarChartOutlined />,
+      label: '报表展示',
+    },
+    {
       key: '/',
       icon: <DashboardOutlined />,
-      label: '仪表盘',
+      label: '对话开发',
+    },
+    {
+      key: '/workflow',
+      icon: <ThunderboltOutlined />,
+      label: '工作流',
     },
     {
       key: '/editor',
       icon: <CodeOutlined />,
-      label: 'ETL 编辑器',
+      label: '知识库管理',
     },
     {
       key: '/settings',
@@ -31,9 +38,20 @@ const MainLayout = () => {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider trigger={null} theme="dark">
+      <Sider 
+        theme="dark" 
+        width={240}
+        style={{
+          overflow: 'auto',
+          height: '100vh',
+          position: 'fixed',
+          left: 0,
+          top: 0,
+          bottom: 0,
+        }}
+      >
         <div style={{ height: 64, padding: 16, textAlign: 'center', color: 'white', fontWeight: 'bold', fontSize: 18 }}>
-          AI Auto-ETL
+          AI Auto-Data-Pipeline
         </div>
         <Menu
           theme="dark"
@@ -41,21 +59,16 @@ const MainLayout = () => {
           selectedKeys={[location.pathname]}
           items={menuItems}
           onClick={({ key }) => navigate(key)}
+          style={{ height: '100%', borderRight: 0 }}
         />
       </Sider>
-      <Layout>
-        <Header style={{ padding: 0, background: colorBgContainer }}>
-          <div style={{ padding: '0 24px', fontSize: 16, fontWeight: 500 }}>
-            AI Auto-ETL 智能报表平台
-          </div>
-        </Header>
+      <Layout style={{ marginLeft: 240 }}>
         <Content
           style={{
-            margin: '24px 16px',
+            margin: 0,
             padding: 24,
-            minHeight: 280,
-            background: colorBgContainer,
-            borderRadius: borderRadiusLG,
+            minHeight: '100vh',
+            background: '#fff',
           }}
         >
           <Outlet />

@@ -35,3 +35,12 @@ async def list_tables():
         return {"success": True, "data": tables}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/delete/{table_name}")
+async def delete_table(table_name: str):
+    try:
+        success = schema_rag_service.delete_table(table_name)
+        return {"success": success, "message": "Schema deleted" if success else "Schema not found"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

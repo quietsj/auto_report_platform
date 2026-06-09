@@ -1,5 +1,5 @@
-host: localhost
+host: 172.29.88.141
 port: 8123
 user: default
 password:
-database: default
+database: report

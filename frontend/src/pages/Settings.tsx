@@ -1,12 +1,33 @@
 import { Card, Typography, Form, Input, Button, message } from 'antd'
+import { useEffect } from 'react'
 
 const { Title } = Typography
+
+const STORAGE_KEY = 'ai_auto_etl_settings'
 
 const Settings = () => {
   const [form] = Form.useForm()
 
-  const handleSave = () => {
-    message.success('设置已保存')
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    if (saved) {
+      try {
+        const settings = JSON.parse(saved)
+        form.setFieldsValue(settings)
+      } catch {
+        // Ignore parsing error
+      }
+    }
+  }, [form])
+
+  const handleSave = async () => {
+    try {
+      const values = await form.validateFields()
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(values))
+      message.success('设置已保存')
+    } catch {
+      message.error('请检查输入')
+    }
   }
 
   return (
@@ -29,12 +50,27 @@ const Settings = () => {
           >
             <Input placeholder="http://localhost:8001" />
           </Form.Item>
+          <Form.Item
+            label="ChromaDB 地址"
+            name="chroma_url"
+            initialValue="http://localhost:8033"
+          >
+            <Input placeholder="http://localhost:8033" />
+          </Form.Item>
           <Form.Item>
             <Button type="primary" onClick={handleSave}>
               保存设置
             </Button>
           </Form.Item>
         </Form>
+      </Card>
+
+      <Card title="说明">
+        <ul>
+          <li>配置信息保存在浏览器 localStorage 中</li>
+          <li>确保后端服务已启动，默认端口为 8000</li>
+          <li>确保 ChromaDB 服务已启动，默认端口为 8033</li>
+        </ul>
       </Card>
     </div>
   )

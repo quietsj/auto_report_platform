@@ -1,13 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .core.config import settings
-from .routers import etl, query, report, schema
+from .routers import etl, query, schema, workflow, report_api, clickhouse
 
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    debug=settings.DEBUG,
-    openapi_url=None
+    debug=settings.DEBUG
 )
 
 app.add_middleware(
@@ -20,8 +19,10 @@ app.add_middleware(
 
 app.include_router(etl.router)
 app.include_router(query.router)
-app.include_router(report.router)
+app.include_router(report_api.router)
 app.include_router(schema.router)
+app.include_router(workflow.router)
+app.include_router(clickhouse.router)
 
 
 @app.get("/")
