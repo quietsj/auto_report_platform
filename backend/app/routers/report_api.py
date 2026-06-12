@@ -131,18 +131,21 @@ class CreateReportRequest(BaseModel):
 @router.get("/", response_model=List[ReportResponse])
 async def list_reports(category: Optional[str] = None, published_only: bool = False):
     """获取报表列表"""
+    where_parts: List[str] = []
+    params: List[Any] = []
+
     if published_only:
-        query = "SELECT * FROM report_metadata WHERE is_published = 1"
-        params: tuple = ()
-        if category:
-            query += " AND category = %s"
-            params = (category,)
-        query += " ORDER BY view_count DESC, created_at DESC"
+        where_parts.append("is_published = 1")
+    if category:
+        where_parts.append("category = %s")
+        params.append(category)
+
+    if where_parts:
+        query = "SELECT * FROM report_metadata WHERE " + " AND ".join(where_parts) + " ORDER BY view_count DESC, created_at DESC"
     else:
         query = "SELECT * FROM report_metadata ORDER BY created_at DESC"
-        params = ()
 
-    results = mysql_service.execute_query(query, params)
+    results = mysql_service.execute_query(query, tuple(params))
     return results
 
 

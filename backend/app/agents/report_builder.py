@@ -3,7 +3,7 @@ from .base_agent import BaseAgent
 
 
 class ReportBuilderAgent(BaseAgent):
-    def __init__(self, model: str = "deepseek-chat"):
+    def __init__(self, model: str = "deepseek-v4-flash"):
         super().__init__(model)
     
     async def run(self, data: Dict, intent: str) -> Dict[str, Any]:
@@ -14,7 +14,7 @@ class ReportBuilderAgent(BaseAgent):
             {"role": "user", "content": prompt}
         ]
         
-        result = await self.litellm_client.chat_completion(
+        result = await self.llm_client.chat_completion(
             model=self.model,
             messages=messages,
             temperature=0.5

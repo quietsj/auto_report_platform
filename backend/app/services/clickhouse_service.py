@@ -110,7 +110,11 @@ class ClickHouseService:
     
     def command(self, sql: str) -> Any:
         """执行命令（如 DDL）"""
-        return self.client.command(sql)
+        try:
+            return self.client.command(sql)
+        except Exception as e:
+            print(f"[ClickHouseService] command 执行失败: {e}")
+            raise
     
     def close(self):
         """关闭连接"""

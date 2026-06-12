@@ -18,7 +18,7 @@ class IntentParserAgent(BaseAgent):
             {"role": "user", "content": prompt}
         ]
         
-        result = await self.litellm_client.chat_completion(
+        result = await self.llm_client.chat_completion(
             model=self.model,
             messages=messages,
             temperature=0.3

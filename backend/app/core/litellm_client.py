@@ -11,7 +11,9 @@ class LiteLLMClient:
         self.api_key = settings.LITELLM_MASTER_KEY
         self.client = AsyncOpenAI(
             api_key=self.api_key,
-            base_url=self.api_base
+            base_url=self.api_base,
+            timeout=600.0,  # 10 分钟，避免 AI 生成长链路超时
+            max_retries=2,
         )
     
     async def chat_completion(

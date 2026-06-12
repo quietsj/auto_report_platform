@@ -1,6 +1,12 @@
 import { Layout, Menu } from 'antd'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { DashboardOutlined, CodeOutlined, SettingOutlined, ThunderboltOutlined, BarChartOutlined } from '@ant-design/icons'
+import {
+  BarChartOutlined,
+  MessageOutlined,
+  BranchesOutlined,
+  BookOutlined,
+  SettingOutlined,
+} from '@ant-design/icons'
 
 const { Sider, Content } = Layout
 
@@ -16,18 +22,18 @@ const MainLayout = () => {
     },
     {
       key: '/',
-      icon: <DashboardOutlined />,
+      icon: <MessageOutlined />,
       label: '对话开发',
     },
     {
       key: '/workflow',
-      icon: <ThunderboltOutlined />,
+      icon: <BranchesOutlined />,
       label: '工作流',
     },
     {
       key: '/editor',
-      icon: <CodeOutlined />,
-      label: '知识库管理',
+      icon: <BookOutlined />,
+      label: '知识库',
     },
     {
       key: '/settings',
@@ -51,7 +57,7 @@ const MainLayout = () => {
         }}
       >
         <div style={{ height: 64, padding: 16, textAlign: 'center', color: 'white', fontWeight: 'bold', fontSize: 18 }}>
-          AI Auto-Data-Pipeline
+          Report Agent
         </div>
         <Menu
           theme="dark"

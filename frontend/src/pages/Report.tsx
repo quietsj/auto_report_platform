@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Card, Input, Button, Row, Col, Select, Space, Typography, Spin, message, Table, Tag, Empty, Tabs, Badge, Modal, Form, InputNumber, Radio, Divider, List } from 'antd'
-import { SearchOutlined, BarChartOutlined, TableOutlined, ArrowLeftOutlined, ReloadOutlined, PlusOutlined, DeleteOutlined, EditOutlined, SaveOutlined, SettingOutlined, DatabaseOutlined } from '@ant-design/icons'
+import { SearchOutlined, BarChartOutlined, TableOutlined, ArrowLeftOutlined, ReloadOutlined, PlusOutlined, DeleteOutlined, EditOutlined, SaveOutlined, SettingOutlined } from '@ant-design/icons'
 import api from '../services/api'
 
 const { Title, Text } = Typography
@@ -221,9 +221,20 @@ const Report = () => {
         ]
         const sql = `SELECT ${selectParts.join(', ')} FROM ${selectedChDb}.${selectedChTable} ${groupBy} LIMIT 1000`
         const response = await api.post('/clickhouse/query', { sql })
+        // 按维度升序排序
+        const rawData = response.data.data || []
+        const sortedData = [...rawData].sort((a: any, b: any) => {
+          for (const dim of selectedDimensions) {
+            const aVal = String(a[dim] ?? '')
+            const bVal = String(b[dim] ?? '')
+            const cmp = aVal.localeCompare(bVal, 'zh-CN', { numeric: true })
+            if (cmp !== 0) return cmp
+          }
+          return 0
+        })
         setQueryResult({
           success: true,
-          data: response.data.data,
+          data: sortedData,
           total: response.data.total,
           sql,
         })
@@ -235,7 +246,17 @@ const Report = () => {
           aggregations: aggregations,
           limit: 1000,
         })
-        setQueryResult(response.data)
+        const rawData = response.data.data || []
+        const sortedData = [...rawData].sort((a: any, b: any) => {
+          for (const dim of selectedDimensions) {
+            const aVal = String(a[dim] ?? '')
+            const bVal = String(b[dim] ?? '')
+            const cmp = aVal.localeCompare(bVal, 'zh-CN', { numeric: true })
+            if (cmp !== 0) return cmp
+          }
+          return 0
+        })
+        setQueryResult({ ...response.data, data: sortedData })
       }
       message.success('查询成功')
     } catch (error: any) {
@@ -337,14 +358,15 @@ const Report = () => {
     setEditReport({ ...editReport, charts: [...editReport.charts, newChart] })
   }
 
-  const updateChart = (idx: number, patch: Partial<ChartItem>) => {
-    const charts = [...editReport.charts]
-    charts[idx] = { ...charts[idx], ...patch }
+  const updateChart = (chartId: number | string, patch: Partial<ChartItem>) => {
+    const charts = editReport.charts.map(c => 
+      c.id === chartId ? { ...c, ...patch } : c
+    )
     setEditReport({ ...editReport, charts })
   }
 
-  const removeChart = (idx: number) => {
-    const charts = editReport.charts.filter((_, i) => i !== idx)
+  const removeChart = (chartId: number | string) => {
+    const charts = editReport.charts.filter(c => c.id !== chartId)
     setEditReport({ ...editReport, charts })
   }
 
@@ -395,7 +417,7 @@ const Report = () => {
       })
       message.success('保存成功')
       setShowEditModal(false)
-      if (selectedReport === editReport.id) {
+      if (selectedReport === editReport.id && editReport.id !== null) {
         loadReportDetail(editReport.id)
       }
       loadReports()
@@ -459,7 +481,7 @@ const Report = () => {
                     } else {
                       api.get(`/reports/${report.id}`).then(res => {
                         openEditModal(res.data)
-                      }).catch(err => {
+                      }).catch(() => {
                         message.error('加载失败')
                       })
                     }
@@ -471,7 +493,7 @@ const Report = () => {
                   title={report.name}
                   description={
                     <div>
-                      <Text type="secondary" ellipsis={{ rows: 2 }}>{report.description}</Text>
+                      <Text type="secondary" ellipsis={{ tooltip: true }}>{report.description}</Text>
                       <div style={{ marginTop: 8 }}>
                         <Tag color="blue">{report.category}</Tag>
                       </div>
@@ -693,8 +715,12 @@ const Report = () => {
               )}
               <Tabs
                 defaultActiveKey="table"
-                items={[
-                  {
+                items={(() => {
+                  // 获取报表配置的图表：只显示用户配置的图表类型；未配置时显示全部
+                  const configuredCharts = reportDetail?.charts && reportDetail.charts.length > 0
+                    ? [...reportDetail.charts].sort((a, b) => (a.layout_order || 0) - (b.layout_order || 0))
+                    : null
+                  const tableItem = {
                     key: 'table',
                     label: <span><TableOutlined /> 表格</span>,
                     children: queryResult.data && queryResult.data.length > 0 ? (
@@ -711,18 +737,53 @@ const Report = () => {
                           key: key,
                           width: 150,
                           ellipsis: true,
+                          sorter: (a: any, b: any) => {
+                            const aVal = a[key]
+                            const bVal = b[key]
+                            if (typeof aVal === 'number' && typeof bVal === 'number') {
+                              return aVal - bVal
+                            }
+                            return String(aVal).localeCompare(String(bVal), 'zh-CN', { numeric: true })
+                          },
                         }))}
                       />
                     ) : <Empty description="暂无数据" />,
-                  },
-                  ...Object.keys(chartTypeMap).filter(k => k !== 'table').map(k => ({
-                    key: k,
-                    label: <span>{chartTypeMap[k]}</span>,
-                    children: queryResult.data && queryResult.data.length > 0 ? (
-                      <PlaceholderChart chartType={k} data={queryResult.data} xField={selectedDimensions[0]} yField={selectedMetrics[0]} />
-                    ) : <Empty />,
-                  })),
-                ]}
+                  }
+
+                  if (!configuredCharts) {
+                    // 未配置图表 - 显示所有图表类型（探索模式）
+                    const allChartTabs = Object.keys(chartTypeMap).filter(k => k !== 'table').map(k => ({
+                      key: k,
+                      label: <span>{chartTypeMap[k]}</span>,
+                      children: queryResult.data && queryResult.data.length > 0 ? (
+                        <PlaceholderChart
+                          chartType={k}
+                          data={queryResult.data}
+                          dimensionFields={selectedDimensions}
+                          metricFields={selectedMetrics}
+                        />
+                      ) : <Empty />,
+                    }))
+                    return [tableItem, ...allChartTabs]
+                  } else {
+                    // 已配置图表 - 只显示配置的图表类型（排除 table，因为已单独显示）
+                    const configuredTabs = configuredCharts
+                      .filter(chart => chart.chart_type !== 'table')
+                      .map((chart) => ({
+                        key: String(chart.id),
+                        label: <span>{chart.title || chartTypeMap[chart.chart_type] || chart.chart_type}</span>,
+                        children: queryResult.data && queryResult.data.length > 0 ? (
+                          <PlaceholderChart
+                            chartType={chart.chart_type}
+                            data={queryResult.data}
+                            dimensionFields={selectedDimensions}
+                            metricFields={selectedMetrics}
+                          />
+                        ) : <Empty />,
+                      }))
+                    return [tableItem, ...configuredTabs]
+                  }
+                })()}
               />
             </Card>
           )}
@@ -900,7 +961,7 @@ const Report = () => {
                     <Empty description="暂无图表配置，点击上方按钮新增" />
                   ) : (
                     <List
-                      dataSource={editReport.charts}
+                      dataSource={[...editReport.charts].sort((a, b) => (a.layout_order || 0) - (b.layout_order || 0))}
                       renderItem={(chart, idx) => (
                         <List.Item
                           key={chart.id}
@@ -908,10 +969,10 @@ const Report = () => {
                         >
                           <Row gutter={8} style={{ alignItems: 'center' }}>
                             <Col span={4}><Text strong>图表 #{idx + 1}</Text></Col>
-                            <Col span={5}><Select size="small" value={chart.chart_type} onChange={(v) => updateChart(idx, { chart_type: v })} options={Object.entries(chartTypeMap).map(([k, v]) => ({ value: k, label: v }))} style={{ width: '100%' }} /></Col>
-                            <Col span={8}><Input size="small" value={chart.title || ''} placeholder="图表标题（可选）" onChange={(e) => updateChart(idx, { title: e.target.value })} /></Col>
-                            <Col span={5}><InputNumber size="small" value={chart.layout_order || 0} onChange={(v) => updateChart(idx, { layout_order: Number(v) || 0 })} style={{ width: '100%' }} placeholder="排序" /></Col>
-                            <Col span={2} style={{ textAlign: 'right' }}><Button type="text" danger size="small" icon={<DeleteOutlined />} onClick={() => removeChart(idx)} /></Col>
+                            <Col span={5}><Select size="small" value={chart.chart_type} onChange={(v) => updateChart(chart.id, { chart_type: v })} options={Object.entries(chartTypeMap).map(([k, v]) => ({ value: k, label: v }))} style={{ width: '100%' }} /></Col>
+                            <Col span={8}><Input size="small" value={chart.title || ''} placeholder="图表标题（可选）" onChange={(e) => updateChart(chart.id, { title: e.target.value })} /></Col>
+                            <Col span={5}><InputNumber size="small" value={chart.layout_order || 0} onChange={(v) => updateChart(chart.id, { layout_order: Number(v) || 0 })} style={{ width: '100%' }} placeholder="排序" /></Col>
+                            <Col span={2} style={{ textAlign: 'right' }}><Button type="text" danger size="small" icon={<DeleteOutlined />} onClick={() => removeChart(chart.id)} /></Col>
                           </Row>
                         </List.Item>
                       )}
@@ -927,128 +988,213 @@ const Report = () => {
   )
 }
 
-// 图表占位组件
-const PlaceholderChart = ({ chartType, data, xField, yField }: {
+// 图表组件：支持多维度 + 多度量
+const PlaceholderChart = ({ chartType, data, dimensionFields, metricFields }: {
   chartType: string
   data: any[]
-  xField?: string
-  yField?: string
+  dimensionFields: string[]
+  metricFields: string[]
 }) => {
   if (!data || data.length === 0) return <Empty />
 
-  const labels = data.map((d: any) => d[xField || Object.keys(d)[0]])
-  const values = data.map((d: any) => {
-    const v = d[yField || Object.keys(d)[1]]
-    return typeof v === 'number' ? v : parseFloat(v) || 0
+  const dims = (dimensionFields && dimensionFields.length > 0) ? dimensionFields : [Object.keys(data[0])[0]]
+  const metrics = (metricFields && metricFields.length > 0) ? metricFields : Object.keys(data[0]).filter(k => k !== dims[0]).slice(0, 1)
+  if (metrics.length === 0) return <Empty description="无度量字段" />
+
+  // 按维度组合标签升序排序
+  const sortedData = [...data].sort((a, b) => {
+    const labelA = dims.map((dim: string) => String(a[dim] ?? '')).join(' - ')
+    const labelB = dims.map((dim: string) => String(b[dim] ?? '')).join(' - ')
+    return labelA.localeCompare(labelB, 'zh-CN', { numeric: true })
   })
-  const max = Math.max(...values, 1)
+
+  const labels: string[] = sortedData.map((d: any) =>
+    dims.map((dim: string) => String(d[dim] ?? '')).join(' - ')
+  )
+
+  const metricValues: number[][] = metrics.map((m: string) =>
+    sortedData.map((d: any) => {
+      const v = d[m]
+      return typeof v === 'number' ? v : parseFloat(v) || 0
+    })
+  )
+
+  const globalMax = Math.max(...metricValues.flat(), 1)
+
+  const metricColors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16', '#a0d911', '#2f54eb']
 
   const containerRef = useRef<HTMLDivElement>(null)
 
-  // ========== 饼图（使用 conic-gradient 绘制真实扇形）==========
+  // ========== 饼图：每个度量一个饼 ==========
   if (chartType === 'pie') {
-    const total = values.reduce((a: number, b: number) => a + b, 0) || 1
-    const colors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16', '#a0d911', '#fa541c']
-    let accDeg = 0
-    const stops: string[] = []
-    labels.forEach((_: any, i: number) => {
-      const percent = (values[i] / total) * 100
-      const start = accDeg
-      accDeg += (values[i] / total) * 360
-      const end = accDeg
-      stops.push(`${colors[i % colors.length]} ${start}deg ${end}deg`)
-    })
-    const gradient = `conic-gradient(${stops.join(', ')})`
     return (
-      <div ref={containerRef} style={{ padding: 20, display: 'flex', alignItems: 'center', gap: 30, flexWrap: 'wrap' }}>
-        <div style={{
-          width: 220, height: 220, borderRadius: '50%',
-          background: gradient,
-          flexShrink: 0,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-        }} />
-        <div style={{ flex: 1, minWidth: 180 }}>
-          {labels.map((label: any, i: number) => {
-            const percent = ((values[i] / total) * 100).toFixed(1)
+      <div ref={containerRef} style={{ padding: 20 }}>
+        <Row gutter={[24, 24]}>
+          {metrics.map((metricName, mi) => {
+            const values = metricValues[mi]
+            const total = values.reduce((a, b) => a + b, 0) || 1
+            const pieColors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2', '#eb2f96', '#fa8c16', '#a0d911', '#fa541c']
+            let accDeg = 0
+            const stops: string[] = []
+            labels.forEach((_, i) => {
+              const start = accDeg
+              accDeg += (values[i] / total) * 360
+              const end = accDeg
+              stops.push(`${pieColors[i % pieColors.length]} ${start}deg ${end}deg`)
+            })
+            const gradient = `conic-gradient(${stops.join(', ')})`
             return (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: 10, fontSize: 13 }}>
-                <div style={{
-                  width: 14, height: 14, borderRadius: 3,
-                  background: colors[i % colors.length],
-                  marginRight: 8, flexShrink: 0,
-                }} />
-                <Text style={{ flex: 1, color: '#333' }}>{String(label)}</Text>
-                <Text style={{ color: '#666', marginLeft: 8 }}>{values[i]} ({percent}%)</Text>
-              </div>
+              <Col xs={24} sm={metrics.length > 2 ? 12 : 24} md={Math.max(12, Math.floor(24 / metrics.length))} key={metricName}>
+                <Card size="small" title={<Text strong>{metricName}</Text>} style={{ height: '100%' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+                    <div style={{
+                      width: 140, height: 140, borderRadius: '50%',
+                      background: gradient,
+                      flexShrink: 0,
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                    }} />
+                    <div style={{ flex: 1, minWidth: 120, maxHeight: 160, overflowY: 'auto' }}>
+                      {labels.map((label, i) => {
+                        const percent = ((values[i] / total) * 100).toFixed(1)
+                        return (
+                          <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: 6, fontSize: 12 }}>
+                            <div style={{
+                              width: 12, height: 12, borderRadius: 2,
+                              background: pieColors[i % pieColors.length],
+                              marginRight: 6, flexShrink: 0,
+                            }} />
+                            <Text style={{ flex: 1, color: '#333', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</Text>
+                            <Text style={{ color: '#666', marginLeft: 6, fontSize: 11 }}>{values[i]} ({percent}%)</Text>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </Card>
+              </Col>
             )
           })}
+        </Row>
+      </div>
+    )
+  }
+
+  // ========== 柱状图：多度量分组 ==========
+  if (chartType === 'column') {
+    const groupWidth = Math.min(100, Math.max(40, 500 / labels.length))
+    const barWidth = Math.max(8, (groupWidth - 8) / metrics.length - 2)
+    return (
+      <div ref={containerRef} style={{ padding: 20, overflowX: 'auto' }}>
+        <div style={{ minWidth: Math.max(600, labels.length * (groupWidth + 10)) }}>
+          <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+            {metrics.map((m, mi) => (
+              <div key={m} style={{ display: 'flex', alignItems: 'center', fontSize: 12 }}>
+                <div style={{ width: 12, height: 12, background: metricColors[mi % metricColors.length], marginRight: 4, borderRadius: 2 }} />
+                <Text>{m}</Text>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'flex-end', height: 300, gap: 4, borderBottom: '1px solid #ddd', borderLeft: '1px solid #ddd', padding: '20px 10px 30px 20px', position: 'relative' }}>
+            {[0.25, 0.5, 0.75, 1].map((t, i) => (
+              <div key={i} style={{ position: 'absolute', left: 20, right: 10, bottom: 30 + t * 250, borderTop: '1px dashed #eee', pointerEvents: 'none' }} />
+            ))}
+            {labels.map((label, i) => (
+              <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: groupWidth, flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 250 }}>
+                  {metrics.map((m, mi) => (
+                    <div key={m} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end' }}>
+                      <div style={{ fontSize: 9, color: '#333', marginBottom: 2 }}>{metricValues[mi][i]}</div>
+                      <div style={{
+                        width: barWidth,
+                        height: `${Math.max(2, (metricValues[mi][i] / globalMax) * 240)}px`,
+                        background: metricColors[mi % metricColors.length],
+                        borderRadius: '2px 2px 0 0',
+                        transition: 'height 0.3s',
+                      }} />
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11, color: '#666', marginTop: 6, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: groupWidth }}>
+                  {label.length > 8 ? label.slice(0, 6) + '...' : label}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     )
   }
 
-  // ========== 柱状图 ==========
-  if (chartType === 'column') {
+  // ========== 条形图：多度量分组 ==========
+  if (chartType === 'bar') {
+    const barHeight = Math.max(14, 28 / metrics.length)
     return (
       <div ref={containerRef} style={{ padding: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', height: 260, gap: 12, borderBottom: '1px solid #ddd', borderLeft: '1px solid #ddd', padding: '20px 10px 10px 20px' }}>
-          {labels.map((label: any, i: number) => (
-            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 10, color: '#333', marginBottom: 4 }}>{values[i]}</div>
-              <div style={{
-                width: '60%', maxWidth: 40, height: `${(values[i] / max) * 200}px`,
-                background: '#1890ff', minHeight: 2,
-                transition: 'height 0.3s',
-                borderRadius: '3px 3px 0 0',
-              }} />
-              <div style={{ fontSize: 11, color: '#666', marginTop: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', width: '100%', textAlign: 'center' }}>{String(label).slice(0, 8)}</div>
+        <div style={{ display: 'flex', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
+          {metrics.map((m, mi) => (
+            <div key={m} style={{ display: 'flex', alignItems: 'center', fontSize: 12 }}>
+              <div style={{ width: 12, height: 12, background: metricColors[mi % metricColors.length], marginRight: 4, borderRadius: 2 }} />
+              <Text>{m}</Text>
             </div>
           ))}
         </div>
-      </div>
-    )
-  }
-
-  // ========== 条形图 ==========
-  if (chartType === 'bar') {
-    return (
-      <div ref={containerRef} style={{ padding: 20 }}>
-        {labels.map((label: any, i: number) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-            <div style={{ width: 100, textAlign: 'right', paddingRight: 8, fontSize: 12, color: '#666', flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{String(label).slice(0, 10)}</div>
-            <div style={{ flex: 1, height: 22, background: '#f0f5ff', borderRadius: 3, position: 'relative' }}>
-              <div style={{
-                background: '#52c41a', height: '100%', width: `${(values[i] / max) * 100}%`, minWidth: 2,
-                transition: 'width 0.3s', borderRadius: 3,
-              }} />
+        {labels.map((label, i) => (
+          <div key={i} style={{ marginBottom: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 2 }}>
+              <div style={{ width: 120, textAlign: 'right', paddingRight: 8, fontSize: 11, color: '#666', flexShrink: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {metrics.map((m, mi) => (
+                  <div key={m} style={{ display: 'flex', alignItems: 'center', height: barHeight + 4 }}>
+                    <div style={{ flex: 1, height: barHeight, background: '#f5f5f5', borderRadius: 2, position: 'relative' }}>
+                      <div style={{
+                        background: metricColors[mi % metricColors.length],
+                        height: '100%', width: `${Math.max(1, (metricValues[mi][i] / globalMax) * 100)}%`,
+                        borderRadius: 2, transition: 'width 0.3s',
+                      }} />
+                    </div>
+                    <span style={{ marginLeft: 6, fontSize: 10, color: '#333', minWidth: 40, textAlign: 'right' }}>{metricValues[mi][i]}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <span style={{ marginLeft: 8, fontSize: 12, color: '#333', minWidth: 50, textAlign: 'right' }}>{values[i]}</span>
           </div>
         ))}
       </div>
     )
   }
 
-  // ========== 折线图（使用 SVG 绘制）==========
+  // ========== 折线图：多度量 - 每个指标一条线 ==========
   if (chartType === 'line') {
-    const width = 600
-    const height = 280
-    const padding = { top: 30, right: 30, bottom: 40, left: 50 }
+    const width = Math.max(700, labels.length * 80)
+    const height = 360
+    const padding = { top: 40, right: 30, bottom: 50, left: 60 }
     const chartW = width - padding.left - padding.right
     const chartH = height - padding.top - padding.bottom
-    const stepX = chartW / Math.max(values.length - 1, 1)
-    const points = values.map((v, i) => ({
-      x: padding.left + i * stepX,
-      y: padding.top + chartH - (v / max) * chartH,
+    const stepX = chartW / Math.max(labels.length - 1, 1)
+
+    const metricPoints = metrics.map((m, mi) => ({
+      name: m,
+      color: metricColors[mi % metricColors.length],
+      points: metricValues[mi].map((v, i) => ({
+        x: padding.left + i * stepX,
+        y: padding.top + chartH - (v / globalMax) * chartH,
+        value: v,
+      })),
     }))
-    const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
-    // Y 轴刻度
-    const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => Math.round(max * t))
+
+    const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => Math.round(globalMax * t))
 
     return (
       <div ref={containerRef} style={{ padding: 20, overflowX: 'auto' }}>
+        <div style={{ display: 'flex', gap: 16, marginBottom: 8, flexWrap: 'wrap' }}>
+          {metricPoints.map((mp) => (
+            <div key={mp.name} style={{ display: 'flex', alignItems: 'center', fontSize: 12 }}>
+              <div style={{ width: 16, height: 3, background: mp.color, marginRight: 4 }} />
+              <Text>{mp.name}</Text>
+            </div>
+          ))}
+        </div>
         <svg width={width} height={height} style={{ display: 'block' }}>
-          {/* Y 轴网格线和刻度 */}
           {[0, 0.25, 0.5, 0.75, 1].map((t, i) => {
             const y = padding.top + chartH - t * chartH
             return (
@@ -1058,56 +1204,72 @@ const PlaceholderChart = ({ chartType, data, xField, yField }: {
               </g>
             )
           })}
-          {/* X 轴 */}
           <line x1={padding.left} y1={padding.top + chartH} x2={padding.left + chartW} y2={padding.top + chartH} stroke="#ddd" />
-          {/* Y 轴 */}
           <line x1={padding.left} y1={padding.top} x2={padding.left} y2={padding.top + chartH} stroke="#ddd" />
-          {/* 折线 */}
-          <path d={pathD} fill="none" stroke="#1890ff" strokeWidth={2.5} />
-          {/* 数据点 */}
-          {points.map((p, i) => (
-            <g key={i}>
-              <circle cx={p.x} cy={p.y} r={4} fill="#fff" stroke="#1890ff" strokeWidth={2} />
-              <text x={p.x} y={p.y - 10} fontSize="10" fill="#333" textAnchor="middle">{values[i]}</text>
-            </g>
-          ))}
-          {/* X 轴标签 */}
-          {points.map((p, i) => (
-            <text key={i} x={p.x} y={padding.top + chartH + 18} fontSize="11" fill="#666" textAnchor="middle">
-              {String(labels[i]).slice(0, 6)}
+          {metricPoints.map((mp) => {
+            const pathD = mp.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
+            return (
+              <g key={mp.name}>
+                <path d={pathD} fill="none" stroke={mp.color} strokeWidth={2.5} />
+                {mp.points.map((p, i) => (
+                  <circle key={i} cx={p.x} cy={p.y} r={4} fill="#fff" stroke={mp.color} strokeWidth={2} />
+                ))}
+              </g>
+            )
+          })}
+          {metricPoints[0].points.map((p, i) => (
+            <text key={i} x={p.x} y={padding.top + chartH + 20} fontSize="11" fill="#666" textAnchor="middle">
+              {String(labels[i]).slice(0, 8)}
             </text>
+          ))}
+          {metricPoints[0].points.map((p, i) => (
+            <text key={i} x={p.x} y={p.y - 8} fontSize="9" fill="#333" textAnchor="middle">{metricPoints[0].points[i].value}</text>
           ))}
         </svg>
       </div>
     )
   }
 
-  // ========== 面积图（使用 SVG 绘制）==========
+  // ========== 面积图：多度量 - 每个指标一个面积 ==========
   if (chartType === 'area') {
-    const width = 600
-    const height = 280
-    const padding = { top: 30, right: 30, bottom: 40, left: 50 }
+    const width = Math.max(700, labels.length * 80)
+    const height = 360
+    const padding = { top: 40, right: 30, bottom: 50, left: 60 }
     const chartW = width - padding.left - padding.right
     const chartH = height - padding.top - padding.bottom
-    const stepX = chartW / Math.max(values.length - 1, 1)
-    const points = values.map((v, i) => ({
-      x: padding.left + i * stepX,
-      y: padding.top + chartH - (v / max) * chartH,
+    const stepX = chartW / Math.max(labels.length - 1, 1)
+
+    const metricPoints = metrics.map((m, mi) => ({
+      name: m,
+      color: metricColors[mi % metricColors.length],
+      points: metricValues[mi].map((v, i) => ({
+        x: padding.left + i * stepX,
+        y: padding.top + chartH - (v / globalMax) * chartH,
+        value: v,
+      })),
     }))
-    const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
-    const areaPath = `${linePath} L ${padding.left + chartW} ${padding.top + chartH} L ${padding.left} ${padding.top + chartH} Z`
-    const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => Math.round(max * t))
+
+    const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => Math.round(globalMax * t))
 
     return (
       <div ref={containerRef} style={{ padding: 20, overflowX: 'auto' }}>
+        <div style={{ display: 'flex', gap: 16, marginBottom: 8, flexWrap: 'wrap' }}>
+          {metricPoints.map((mp) => (
+            <div key={mp.name} style={{ display: 'flex', alignItems: 'center', fontSize: 12 }}>
+              <div style={{ width: 16, height: 12, background: mp.color, opacity: 0.4, marginRight: 4, borderRadius: 2 }} />
+              <Text>{mp.name}</Text>
+            </div>
+          ))}
+        </div>
         <svg width={width} height={height} style={{ display: 'block' }}>
           <defs>
-            <linearGradient id="areaGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="#13c2c2" stopOpacity="0.5" />
-              <stop offset="100%" stopColor="#13c2c2" stopOpacity="0.05" />
-            </linearGradient>
+            {metricPoints.map((mp, mi) => (
+              <linearGradient key={mi} id={`areaGrad-${mi}`} x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stopColor={mp.color} stopOpacity="0.45" />
+                <stop offset="100%" stopColor={mp.color} stopOpacity="0.03" />
+              </linearGradient>
+            ))}
           </defs>
-          {/* Y 轴网格线和刻度 */}
           {[0, 0.25, 0.5, 0.75, 1].map((t, i) => {
             const y = padding.top + chartH - t * chartH
             return (
@@ -1117,25 +1279,24 @@ const PlaceholderChart = ({ chartType, data, xField, yField }: {
               </g>
             )
           })}
-          {/* X 轴 */}
           <line x1={padding.left} y1={padding.top + chartH} x2={padding.left + chartW} y2={padding.top + chartH} stroke="#ddd" />
-          {/* Y 轴 */}
           <line x1={padding.left} y1={padding.top} x2={padding.left} y2={padding.top + chartH} stroke="#ddd" />
-          {/* 面积填充 */}
-          <path d={areaPath} fill="url(#areaGradient)" />
-          {/* 折线 */}
-          <path d={linePath} fill="none" stroke="#13c2c2" strokeWidth={2.5} />
-          {/* 数据点 */}
-          {points.map((p, i) => (
-            <g key={i}>
-              <circle cx={p.x} cy={p.y} r={4} fill="#fff" stroke="#13c2c2" strokeWidth={2} />
-              <text x={p.x} y={p.y - 10} fontSize="10" fill="#333" textAnchor="middle">{values[i]}</text>
-            </g>
-          ))}
-          {/* X 轴标签 */}
-          {points.map((p, i) => (
-            <text key={i} x={p.x} y={padding.top + chartH + 18} fontSize="11" fill="#666" textAnchor="middle">
-              {String(labels[i]).slice(0, 6)}
+          {metricPoints.map((mp, mi) => {
+            const linePath = mp.points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
+            const areaPath = `${linePath} L ${padding.left + chartW} ${padding.top + chartH} L ${padding.left} ${padding.top + chartH} Z`
+            return (
+              <g key={mp.name}>
+                <path d={areaPath} fill={`url(#areaGrad-${mi})`} />
+                <path d={linePath} fill="none" stroke={mp.color} strokeWidth={2.5} />
+                {mp.points.map((p, i) => (
+                  <circle key={i} cx={p.x} cy={p.y} r={3.5} fill="#fff" stroke={mp.color} strokeWidth={2} />
+                ))}
+              </g>
+            )
+          })}
+          {metricPoints[0].points.map((p, i) => (
+            <text key={i} x={p.x} y={padding.top + chartH + 20} fontSize="11" fill="#666" textAnchor="middle">
+              {String(labels[i]).slice(0, 8)}
             </text>
           ))}
         </svg>
@@ -1143,22 +1304,9 @@ const PlaceholderChart = ({ chartType, data, xField, yField }: {
     )
   }
 
-  // 默认：柱状图
   return (
     <div ref={containerRef} style={{ padding: 20 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', height: 260, gap: 12, borderBottom: '1px solid #ddd', borderLeft: '1px solid #ddd', padding: '20px 10px 10px 20px' }}>
-        {labels.map((label: any, i: number) => (
-          <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
-            <div style={{ fontSize: 10, color: '#333', marginBottom: 4 }}>{values[i]}</div>
-            <div style={{
-              width: '60%', maxWidth: 40, height: `${(values[i] / max) * 200}px`,
-              background: chartType === 'area' ? '#13c2c2' : '#1890ff', minHeight: 2,
-              transition: 'height 0.3s', borderRadius: '3px 3px 0 0',
-            }} />
-            <div style={{ fontSize: 11, color: '#666', marginTop: 6 }}>{String(label).slice(0, 8)}</div>
-          </div>
-        ))}
-      </div>
+      <Text type="secondary">暂不支持的图表类型</Text>
     </div>
   )
 }

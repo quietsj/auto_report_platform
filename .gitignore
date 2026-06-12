@@ -18,4 +18,4 @@ start_proxy.sh
 .trae/specs
 frontend/.vite
 scripts
-config
+config/local.yaml

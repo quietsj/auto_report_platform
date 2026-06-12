@@ -66,9 +66,13 @@ class Settings(BaseSettings):
     MYSQL_DATABASE: str = ""
     MYSQL_CHARSET: str = ""
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    # === MySQL Pipeline（数仓层）===
+    PIPELINE_HOST: str = ""
+    PIPELINE_PORT: int = 0
+    PIPELINE_USER: str = ""
+    PIPELINE_PASSWORD: str = ""
+    PIPELINE_DATABASE: str = ""
+    PIPELINE_CHARSET: str = ""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -100,6 +104,15 @@ class Settings(BaseSettings):
         self.MYSQL_DATABASE = mysql_cfg.get("database", "")
         self.MYSQL_CHARSET = mysql_cfg.get("charset", "")
 
+        # MySQL Pipeline（数仓层，local.yaml 中的 mysql-pipeline）
+        mc_cfg = local.get("mysql-pipeline", {})
+        self.PIPELINE_HOST = mc_cfg.get("host") or self.MYSQL_HOST
+        self.PIPELINE_PORT = int(mc_cfg.get("port") or self.MYSQL_PORT or 0)
+        self.PIPELINE_USER = mc_cfg.get("user") or self.MYSQL_USER
+        self.PIPELINE_PASSWORD = (mc_cfg.get("password") or self.MYSQL_PASSWORD) or ""
+        self.PIPELINE_DATABASE = mc_cfg.get("database") or self.MYSQL_DATABASE
+        self.PIPELINE_CHARSET = mc_cfg.get("charset") or self.MYSQL_CHARSET
+
         # --- clickhouse-config.yaml ---
         ch = load_yaml_config("clickhouse-config.yaml")
         self.CLICKHOUSE_HOST = ch.get("host", "")
@@ -117,16 +130,8 @@ class Settings(BaseSettings):
 
         # --- litellm-config.yaml ---
         llm = load_yaml_config("litellm-config.yaml")
-        general = llm.get("general_settings", {})
-        self.LITELLM_MASTER_KEY = _resolve_env_value(general.get("master_key", ""))
-        self.LITELLM_API_BASE = llm.get("api_base", general.get("api_base", "") or "")
-        self.LITELLM_MODEL_LIST = []
-        for model in llm.get("model_list", []):
-            params = model.get("litellm_params", {})
-            # 解析环境变量中的 api_key
-            params["api_key"] = _resolve_env_value(params.get("api_key", ""))
-            model["litellm_params"] = params
-            self.LITELLM_MODEL_LIST.append(model)
+        self.LITELLM_MASTER_KEY = llm.get("api_key", "")
+        self.LITELLM_API_BASE = llm.get("api_base", "")
 
 
 settings = Settings()
