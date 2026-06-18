@@ -21,7 +21,7 @@ const MainLayout = () => {
       label: '报表展示',
     },
     {
-      key: '/',
+      key: '/chat',
       icon: <MessageOutlined />,
       label: '对话开发',
     },

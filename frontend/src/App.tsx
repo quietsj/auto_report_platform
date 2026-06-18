@@ -6,7 +6,7 @@ import Editor from './pages/Editor'
 import Settings from './pages/Settings'
 import Workflow from './pages/Workflow'
 import Report from './pages/Report'
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 
 function App() {
   return (
@@ -14,7 +14,8 @@ function App() {
       <Router>
         <Routes>
           <Route path="/" element={<MainLayout />}>
-            <Route index element={<Dashboard />} />
+            <Route path="chat" element={<Dashboard />} />
+            <Route index element={<Navigate to="/report" replace />} />
             <Route path="workflow" element={<Workflow />} />
             <Route path="editor" element={<Editor />} />
             <Route path="report" element={<Report />} />

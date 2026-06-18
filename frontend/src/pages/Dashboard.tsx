@@ -1,14 +1,14 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import {
   Card, Input, Button, Typography, List, Tag, Space, Divider,
   message, Spin, Tooltip, Modal, Steps, Descriptions,
-  Empty, Select, InputNumber
+  Empty, Select, InputNumber, Badge
 } from 'antd'
 import {
   SendOutlined, UserOutlined, RobotOutlined, CopyOutlined,
   ThunderboltOutlined, DatabaseOutlined, FileTextOutlined,
   CheckCircleOutlined, LoadingOutlined, SaveOutlined,
-  EyeOutlined, EyeInvisibleOutlined,
+  EyeOutlined, EyeInvisibleOutlined, PlusOutlined, DeleteOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
@@ -180,21 +180,93 @@ const Dashboard = () => {
   const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set())
   const [previewResult, setPreviewResult] = useState<{ result: PipelineResult; messageId: string } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
 
+  // 会话 ID（用于多轮对话）- 从 localStorage 恢复
+  const [sessionId, setSessionId] = useState<string | null>(() => {
+    return localStorage.getItem('pipeline_session_id')
+  })
+  
+  // 当 sessionId 变化时，同步到 localStorage
+  useEffect(() => {
+    if (sessionId) {
+      localStorage.setItem('pipeline_session_id', sessionId)
+    } else {
+      localStorage.removeItem('pipeline_session_id')
+    }
+  }, [sessionId])
   // 模型选择
   const [selectedModel, setSelectedModel] = useState<string>('deepseek-v4-pro')
   // 提交弹框中的向量库配置
   const [persistChunkSize, setPersistChunkSize] = useState<number>(1500)
   const [persistSeparators, setPersistSeparators] = useState<string[]>([';', ',', ' '])
 
-  // 首次进入页面：将消息列表区域滚动到最顶部
-  useEffect(() => {
-    if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTop = 0
+  // ===== 多轮会话结果自动合并（表名相同则覆盖，不同则新增）=====
+  const mergedResult = useMemo(() => {
+    // 过滤所有包含 pipelineResult 的消息
+    const results = messages
+      .filter(m => m.pipelineResult)
+      .map(m => m.pipelineResult!)
+
+    if (results.length === 0) {
+      return null
     }
-  }, [])
+
+    // 使用 Map 存储，按表名去重（最新的覆盖旧的）
+    const tablesMap = new Map<string, typeof results[0]['tables'][0]>()
+    const chTablesMap = new Map<string, typeof results[0]['clickhouse_tables'][0]>()
+    const syncScriptsMap = new Map<string, typeof results[0]['sync_scripts'][0]>()
+    const demandAnalyses: string[] = []
+
+    // 遍历所有结果，后面的覆盖前面的
+    results.forEach(result => {
+      // 收集需求分析
+      if (result.demand_analysis) {
+        demandAnalyses.push(result.demand_analysis)
+      }
+
+      // MySQL 表：按表名去重（确保是数组）
+      const tables = Array.isArray(result.tables) ? result.tables : []
+      tables.forEach(table => {
+        tablesMap.set(table.table_name, table)
+      })
+
+      // ClickHouse 表：按表名去重（确保是数组）
+      const chTables = Array.isArray(result.clickhouse_tables) ? result.clickhouse_tables : []
+      chTables.forEach(table => {
+        chTablesMap.set(table.ch_table_name, table)
+      })
+
+      // 同步脚本：按名称去重（确保是数组）
+      const syncScripts = Array.isArray(result.sync_scripts) ? result.sync_scripts : []
+      syncScripts.forEach(script => {
+        syncScriptsMap.set(script.name, script)
+      })
+    })
+
+    // 转换为数组，并按层级排序（DIM -> DWD -> DWS -> ADS）
+    const layerOrder: Record<string, number> = { dim: 1, dwd: 2, dws: 3, ads: 4 }
+    const mergedTables = Array.from(tablesMap.values()).sort((a, b) => {
+      const orderA = layerOrder[a.layer] || 99
+      const orderB = layerOrder[b.layer] || 99
+      if (orderA !== orderB) return orderA - orderB
+      // 同层级内按表名排序，保证稳定的显示顺序
+      return (a.table_name || '').localeCompare(b.table_name || '')
+    })
+    const mergedCHTables = Array.from(chTablesMap.values())
+    const mergedSyncScripts = Array.from(syncScriptsMap.values())
+
+    // 构建合并后的结果
+    const result: PipelineResult = {
+      demand_analysis: demandAnalyses.join('；'),
+      tables: mergedTables,
+      clickhouse_tables: mergedCHTables,
+      sync_scripts: mergedSyncScripts,
+      execution_order: mergedTables.map(t => t.table_name),
+    }
+
+    return result
+  }, [messages])
 
   // 有新消息时滚动到底部
   useEffect(() => {
@@ -246,7 +318,12 @@ const Dashboard = () => {
       const res = await api.post('/chat/pipeline', {
         user_input: userInput,
         model: selectedModel,
+        session_id: sessionId,  // 传递 session_id 用于多轮对话
       })
+      // 保存 session_id
+      if (res.data.session_id) {
+        setSessionId(res.data.session_id)
+      }
       setMessages(prev => prev.map(m => {
         if (m.id !== assistantMsgId) return m
         const updatedSteps: GenerationStep[] = [
@@ -359,12 +436,16 @@ const Dashboard = () => {
 
         {renderSummarySection(result)}
 
-        {/* 入口按钮：预览详细内容 & 确认 */}
+        {/* 入口按钮：预览详细内容 & 确认（显示合并后的结果）*/}
         <Space style={{ marginTop: 4 }} wrap>
           <Button
             type="primary"
             icon={<EyeOutlined />}
-            onClick={() => setPreviewResult({ result, messageId: msg.id })}
+            onClick={() => {
+              // 使用合并后的结果（自动去重：表名相同则覆盖，不同则新增）
+              const displayResult = mergedResult || result
+              setPreviewResult({ result: displayResult, messageId: msg.id })
+            }}
           >
             预览链路代码 & 报表配置
           </Button>
@@ -414,7 +495,13 @@ const Dashboard = () => {
           <Card size="small" title={`MySQL 表（${result.tables.length} 个）`} style={{ marginBottom: 12 }}>
             <List
               size="small"
-              dataSource={result.tables}
+              dataSource={[...result.tables].sort((a, b) => {
+                const layerOrder: Record<string, number> = { dim: 1, dwd: 2, dws: 3, ads: 4 }
+                const orderA = layerOrder[a.layer] || 99
+                const orderB = layerOrder[b.layer] || 99
+                if (orderA !== orderB) return orderA - orderB
+                return (a.table_name || '').localeCompare(b.table_name || '')
+              })}
               style={{ background: '#fafafa', borderRadius: 6 }}
               renderItem={(t) => {
                 const key = `p-mysql-${t.table_name}`
@@ -779,14 +866,11 @@ const Dashboard = () => {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 48px)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 48px)', padding: '0 4px 8px' }}>
       {/* 消息列表 */}
-      <div
-        ref={messagesContainerRef}
-        style={{ flex: 1, overflow: 'auto', marginBottom: 16, padding: '8px 4px' }}
-      >
+      <div style={{ marginBottom: 16 }}>
         {messages.length === 0 && !sending && (
-          <div style={{ textAlign: 'center', padding: '4px 16px 12px' }}>
+          <div style={{ textAlign: 'center', padding: '20px 16px 12px' }}>
             {/* 欢迎卡片 */}
             <div style={{
               maxWidth: 500,
@@ -866,105 +950,107 @@ const Dashboard = () => {
           </div>
         )}
 
-        <List
-          dataSource={messages}
-          renderItem={(msg) => (
-            <List.Item
-              style={{
-                justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                border: 'none',
-                padding: '8px 0',
-              }}
-            >
-              <div style={{
-                maxWidth: '80%',
-                width: '100%',
-                display: 'flex',
-                flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
-                alignItems: 'flex-start',
-                gap: 12,
-              }}>
-                {/* 头像 */}
+        {messages.length > 0 && (
+          <List
+            dataSource={messages}
+            renderItem={(msg) => (
+              <List.Item
+                style={{
+                  justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                  border: 'none',
+                  padding: '8px 0',
+                }}
+              >
                 <div style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: '50%',
-                  background: msg.role === 'user'
-                    ? 'linear-gradient(135deg, #52c41a 0%, #389e0d 100%)'
-                    : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  maxWidth: '80%',
+                  width: '100%',
                   display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: msg.role === 'user'
-                    ? '0 4px 12px rgba(82, 196, 26, 0.3)'
-                    : '0 4px 12px rgba(102, 126, 234, 0.3)',
-                  flexShrink: 0,
+                  flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
+                  alignItems: 'flex-start',
+                  gap: 12,
                 }}>
-                  {msg.role === 'user'
-                    ? <UserOutlined style={{ fontSize: 18, color: '#fff' }} />
-                    : <RobotOutlined style={{ fontSize: 18, color: '#fff' }} />
-                  }
-                </div>
-
-                {/* 消息气泡 */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {/* 用户名标签 */}
+                  {/* 头像 */}
                   <div style={{
-                    marginBottom: 4,
-                    fontSize: 12,
-                    color: msg.role === 'user' ? '#52c41a' : '#667eea',
-                    textAlign: msg.role === 'user' ? 'right' : 'left',
-                  }}>
-                    {msg.role === 'user' ? '您' : 'AI 助手'}
-                  </div>
-
-                  {/* 消息卡片 */}
-                  <Card
-                    size="small"
-                    style={{
-                      background: msg.role === 'user'
-                        ? 'linear-gradient(135deg, #e6f7ff 0%, #bae0ff 100%)'
-                        : '#fff',
-                      border: msg.role === 'user'
-                        ? '1px solid #91d5ff'
-                        : '1px solid #e8e8e8',
-                      borderRadius: msg.role === 'user'
-                        ? '16px 16px 4px 16px'
-                        : '16px 16px 16px 4px',
-                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
-                    }}
-                    bodyStyle={{ padding: msg.role === 'user' ? '12px 16px' : '12px 16px' }}
-                  >
-                    <div style={{ marginBottom: msg.role === 'assistant' ? 0 : 0 }}>
-                      {msg.role === 'user'
-                        ? <Text style={{ color: '#333', lineHeight: 1.6 }}>{msg.content}</Text>
-                        : renderAssistantMessage(msg)
-                      }
-                    </div>
-                  </Card>
-
-                  {/* 时间戳和状态 */}
-                  <div style={{
-                    marginTop: 6,
-                    fontSize: 11,
-                    color: '#999',
+                    width: 40,
+                    height: 40,
+                    borderRadius: '50%',
+                    background: msg.role === 'user'
+                      ? 'linear-gradient(135deg, #52c41a 0%, #389e0d 100%)'
+                      : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 8,
-                    justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                    justifyContent: 'center',
+                    boxShadow: msg.role === 'user'
+                      ? '0 4px 12px rgba(82, 196, 26, 0.3)'
+                      : '0 4px 12px rgba(102, 126, 234, 0.3)',
+                    flexShrink: 0,
                   }}>
-                    <span>{msg.timestamp.toLocaleTimeString()}</span>
-                    {msg.persisted && (
-                      <Tag color="success" icon={<CheckCircleOutlined />} style={{ margin: 0 }}>
-                        已写入工作流
-                      </Tag>
-                    )}
+                    {msg.role === 'user'
+                      ? <UserOutlined style={{ fontSize: 18, color: '#fff' }} />
+                      : <RobotOutlined style={{ fontSize: 18, color: '#fff' }} />
+                    }
+                  </div>
+
+                  {/* 消息气泡 */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {/* 用户名标签 */}
+                    <div style={{
+                      marginBottom: 4,
+                      fontSize: 12,
+                      color: msg.role === 'user' ? '#52c41a' : '#667eea',
+                      textAlign: msg.role === 'user' ? 'right' : 'left',
+                    }}>
+                      {msg.role === 'user' ? '您' : 'AI 助手'}
+                    </div>
+
+                    {/* 消息卡片 */}
+                    <Card
+                      size="small"
+                      style={{
+                        background: msg.role === 'user'
+                          ? 'linear-gradient(135deg, #e6f7ff 0%, #bae0ff 100%)'
+                          : '#fff',
+                        border: msg.role === 'user'
+                          ? '1px solid #91d5ff'
+                          : '1px solid #e8e8e8',
+                        borderRadius: msg.role === 'user'
+                          ? '16px 16px 4px 16px'
+                          : '16px 16px 16px 4px',
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.06)',
+                      }}
+                      bodyStyle={{ padding: msg.role === 'user' ? '12px 16px' : '12px 16px' }}
+                    >
+                      <div>
+                        {msg.role === 'user'
+                          ? <Text style={{ color: '#333', lineHeight: 1.6 }}>{msg.content}</Text>
+                          : renderAssistantMessage(msg)
+                        }
+                      </div>
+                    </Card>
+
+                    {/* 时间戳和状态 */}
+                    <div style={{
+                      marginTop: 6,
+                      fontSize: 11,
+                      color: '#999',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                    }}>
+                      <span>{msg.timestamp.toLocaleTimeString()}</span>
+                      {msg.persisted && (
+                        <Tag color="success" icon={<CheckCircleOutlined />} style={{ margin: 0 }}>
+                          已写入工作流
+                        </Tag>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            </List.Item>
-          )}
-        />
+              </List.Item>
+            )}
+          />
+        )}
 
         {sending && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
@@ -979,12 +1065,36 @@ const Dashboard = () => {
       {/* 输入区 */}
       <Card size="small" bodyStyle={{ padding: '10px 14px' }}>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8 }}>
+          <Button
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              Modal.confirm({
+                title: '新建对话',
+                content: '确定要清空当前对话，开始新的会话吗？',
+                okText: '确定',
+                cancelText: '取消',
+                onOk: () => {
+                  setMessages([])
+                  setSessionId(null)
+                  message.success('已开启新对话')
+                },
+              })
+            }}
+          >
+            新建对话
+          </Button>
+          {sessionId && (
+            <Tag color="blue" style={{ fontSize: 11 }}>
+              会话: {sessionId.slice(-8)}
+            </Tag>
+          )}
           <Text type="secondary" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>模型：</Text>
           <Select
             size="small"
             value={selectedModel}
             onChange={(v) => setSelectedModel(v)}
-            style={{ width: 180 }}
+            style={{ width: 160 }}
             options={[
               { value: 'deepseek-v4-pro', label: 'deepseek-v4-pro（高质量）' },
               { value: 'deepseek-v4-flash', label: 'deepseek-v4-flash（快速）' },

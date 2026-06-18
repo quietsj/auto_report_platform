@@ -4,9 +4,10 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
-from datetime import datetime
 from ..agents.pipeline_agent import PipelineAgent
 from ..services.mysql_service import mysql_service
+from ..core.session_manager import session_manager
+from langchain_core.messages import HumanMessage, AIMessage
 
 
 router = APIRouter(prefix="/api/v1/chat", tags=["对话开发"])
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/api/v1/chat", tags=["对话开发"])
 class PipelineRequest(BaseModel):
     user_input: str
     model: Optional[str] = "deepseek-v4-pro"
+    session_id: Optional[str] = None  # 会话 ID，用于多轮对话
     chunk_size: Optional[int] = 1500
     custom_separators: Optional[List[str]] = None
     context: Optional[Dict[str, Any]] = None
@@ -42,16 +44,57 @@ LAYER_FOLDER_MAP = {
 }
 
 
+# ==================== 会话管理接口 ====================
+
+@router.get("/sessions")
+async def list_sessions():
+    """获取所有会话列表"""
+    return {
+        "sessions": session_manager.list_sessions()
+    }
+
+
+@router.get("/sessions/{session_id}")
+async def get_session(session_id: str):
+    """获取指定会话的详情"""
+    session = session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return {
+        "session_id": session.session_id,
+        "messages": [m.model_dump() for m in session.messages],
+        "created_at": session.created_at,
+        "updated_at": session.updated_at,
+    }
+
+
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """删除指定会话"""
+    if session_manager.delete_session(session_id):
+        return {"message": "删除成功"}
+    raise HTTPException(status_code=404, detail="会话不存在")
+
+
+@router.post("/sessions/clear/{session_id}")
+async def clear_session(session_id: str):
+    """清空会话历史（保留会话）"""
+    if session_manager.clear_session(session_id):
+        return {"message": "会话已清空"}
+    raise HTTPException(status_code=404, detail="会话不存在")
+
+
 # ==================== 对话生成接口 ====================
 
 @router.post("/pipeline")
 async def generate_pipeline(req: PipelineRequest):
     """
-    根据用户需求生成完整数仓链路
+    根据用户需求生成完整数仓链路，支持多轮会话
 
     Args:
         user_input: 用户需求描述
         model: 模型名称（deepseek-v4-pro / deepseek-v4-flash）
+        session_id: 会话 ID，不传则创建新会话
         chunk_size: 向量数据库块大小（默认 1500）
         custom_separators: 自定义分隔符列表（默认 [';', ',', ' ']）
         context: 可选业务上下文
@@ -60,13 +103,32 @@ async def generate_pipeline(req: PipelineRequest):
     if model_name not in ("deepseek-v4-pro", "deepseek-v4-flash"):
         model_name = "deepseek-v4-pro"
 
-    agent = PipelineAgent(model=model_name)
-    result = await agent.run(user_input=req.user_input, context=req.context)
+    # 会话管理：如果 session_id 为空，创建新会话
+    session_id = req.session_id
+    if not session_id:
+        session_id = session_manager.create_session()
+        print(f"[chat/pipeline] 创建新会话: {session_id}")
+    else:
+        # 确保会话存在
+        if not session_manager.get_session(session_id):
+            session_manager.create_session(session_id)
+            print(f"[chat/pipeline] 会话不存在，重新创建: {session_id}")
+
+    # 创建 Agent
+    agent = PipelineAgent(model=model_name, session_id=session_id)
+
+    # 从 session_manager 获取 llm_history（持久化，跨请求保存历史）
+    llm_history = session_manager.get_llm_history(session_id)
+    print(f"[chat/pipeline] 获取 LLM 历史: session={session_id}, history_size={len(llm_history.messages) if llm_history else 0}")
+
+    # 执行对话生成（传入 session_manager，由 Agent 内部获取 LLM 历史）
+    result = await agent.run(user_input=req.user_input, context=req.context, session_manager=session_manager)
 
     if not result.get("success"):
         raise HTTPException(status_code=500, detail=result.get("error", "生成失败"))
 
     return {
+        "session_id": session_id,
         "demand_analysis": result.get("demand_analysis"),
         "tables": result.get("tables", []),
         "clickhouse_tables": result.get("clickhouse_tables", []),
