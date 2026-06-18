@@ -2,7 +2,7 @@
 
 > 🚀 基于大语言模型的一站式数据开发平台：用自然语言描述需求，自动生成数仓链路（ODS → DIM → DWD → DWS → ADS → ClickHouse）、报表配置与可运行脚本。
 
-![对话开发示例](file:///C:/Users/tanshiji/Desktop/Learning%20Summary/images/report_chat.png)
+![对话开发示例](./images/report_chat.png)
 
 ---
 
@@ -19,16 +19,20 @@
 ## 🏗️ 技术架构
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#f1f5f9', 'primaryTextColor': '#334155', 'primaryBorderColor': '#94a3b8', 'lineColor': '#64748b', 'secondaryColor': '#f1f5f9', 'tertiaryColor': '#f8fafc'}}}%%
 graph TB
-    subgraph Frontend["前端 (React + Ant Design)"]
-        Chat["/chat 对话开发"]
-        Report["/report 报表展示"]
-        Workflow["/workflow 工作流"]
-        Editor["/editor 知识库"]
-        Settings["/settings 系统设置"]
+    subgraph Frontend["<b>前端(React + Ant Design)</b>"]
+        direction LR
+        Chat["/chat<br/>对话开发"]
+        Report["/report<br/>报表展示"]
+        Workflow["/workflow<br/>工作流"]
+        Editor["/editor<br/>知识库"]
+        Settings["/settings<br/>系统设置"]
     end
+    style Frontend fill:none,stroke:#94a3b8,stroke-width:2px,color:#334155
     
-    subgraph Backend["后端 (FastAPI)"]
+    subgraph Backend["<b>后端(FastAPI)</b>"]
+        direction TB
         Routers["Routers"]
         Agents["Agents"]
         Services["Services"]
@@ -37,22 +41,40 @@ graph TB
         Agents --> Services
         Services --> Models
     end
+    style Backend fill:none,stroke:#94a3b8,stroke-width:2px,color:#334155
     
-    subgraph External["外部服务"]
-        LiteLLM["LiteLLM (多模型网关)"]
-        BGE["BGE Embedding (向量服务)"]
-        DB["MySQL + ClickHouse"]
+    subgraph External["<b>外部服务</b>"]
+        direction LR
+        LiteLLM["LiteLLM<br/>多模型网关"]
+        BGE["BGE Embedding<br/>向量服务"]
+        DB["MySQL +<br/>ClickHouse"]
     end
+    style External fill:none,stroke:#94a3b8,stroke-width:2px,color:#334155
     
-    Chat -->|HTTP/REST| Routers
-    Report -->|HTTP/REST| Routers
-    Workflow -->|HTTP/REST| Routers
-    Editor -->|HTTP/REST| Routers
-    Settings -->|HTTP/REST| Routers
+    Chat --> Routers
+    Report --> Routers
+    Workflow --> Routers
+    Editor --> Routers
+    Settings --> Routers
     
-    Agents -->|LLM调用| LiteLLM
-    Agents -->|向量检索| BGE
-    Services -->|数据读写| DB
+    Agents -.->|"LLM调用"| LiteLLM
+    Agents -.->|"向量检索"| BGE
+    Services -.->|"数据读写"| DB
+    
+    style Routers fill:#e2e8f0,stroke:#16a34a,color:#334155
+    style Agents fill:#e2e8f0,stroke:#16a34a,color:#334155
+    style Services fill:#e2e8f0,stroke:#16a34a,color:#334155
+    style Models fill:#e2e8f0,stroke:#16a34a,color:#334155
+    
+    style Chat fill:#f1f5f9,stroke:#16a34a,color:#334155
+    style Report fill:#f1f5f9,stroke:#16a34a,color:#334155
+    style Workflow fill:#f1f5f9,stroke:#16a34a,color:#334155
+    style Editor fill:#f1f5f9,stroke:#16a34a,color:#334155
+    style Settings fill:#f1f5f9,stroke:#16a34a,color:#334155
+    
+    style LiteLLM fill:#f1f5f9,stroke:#16a34a,color:#334155
+    style BGE fill:#f1f5f9,stroke:#16a34a,color:#334155
+    style DB fill:#f1f5f9,stroke:#16a34a,color:#334155
 ```
 
 ### 技术栈详情
@@ -151,45 +173,66 @@ auto_report_generate/
 ### 对话开发流程
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#f1f5f9', 'primaryTextColor': '#334155', 'primaryBorderColor': '#94a3b8', 'lineColor': '#64748b'}}}%%
 flowchart TD
-    A[用户输入需求] --> B[RAG 检索知识库]
-    B --> C[PipelineAgent.run]
-    C --> D[LangChain LCEL 对话链]
-    D --> E[生成结构化输出]
+    A["👤 用户输入需求"] --> B["🔍 RAG 检索知识库"]
+    B --> C["⚙️ PipelineAgent.run"]
+    C --> D["🔗 LangChain LCEL 对话链"]
+    D --> E["📤 生成结构化输出"]
     
-    E --> F1[MySQL 表定义]
-    E --> F2[ClickHouse DDL]
-    E --> F3[同步脚本]
-    E --> F4[报表配置]
+    E --> F1["🗄️ MySQL 表定义<br/>(DIM/DWD/DWS/ADS)"]
+    E --> F2["🏗️ ClickHouse DDL"]
+    E --> F3["⚡ 同步脚本"]
+    E --> F4["📊 报表配置"]
     
-    F1 --> G[前端预览]
+    F1 --> G["👁️ 前端预览"]
     F2 --> G
     F3 --> G
     F4 --> G
     
-    G --> H[一键写入工作流]
-    H --> I[(MySQL 元数据表)]
+    G --> H["💾 一键写入工作流"]
+    H --> I["📁 MySQL 元数据表"]
+    
+    style A fill:#f1f5f9,stroke:#94a3b8,color:#334155
+    style B fill:#f1f5f9,stroke:#94a3b8,color:#334155
+    style C fill:#e2e8f0,stroke:#94a3b8,color:#334155
+    style D fill:#e2e8f0,stroke:#94a3b8,color:#334155
+    style E fill:#e2e8f0,stroke:#94a3b8,color:#334155
+    style G fill:#f1f5f9,stroke:#94a3b8,color:#334155
+    style H fill:#f1f5f9,stroke:#94a3b8,color:#334155
+    style I fill:#f1f5f9,stroke:#94a3b8,color:#334155
+    
+    style F1 fill:#f1f5f9,stroke:#94a3b8,color:#334155
+    style F2 fill:#f1f5f9,stroke:#94a3b8,color:#334155
+    style F3 fill:#f1f5f9,stroke:#94a3b8,color:#334155
+    style F4 fill:#f1f5f9,stroke:#94a3b8,color:#334155
 ```
 
 ### 会话管理设计
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#f1f5f9', 'primaryTextColor': '#334155', 'primaryBorderColor': '#94a3b8', 'lineColor': '#64748b', 'actorBkgColor': '#f1f5f9', 'actorBorderColor': '#16a34a', 'actorTextColor': '#334155', 'actorLineColor': '#16a34a', 'signalColor': '#64748b', 'signalTextColor': '#334155'}}}%%
 sequenceDiagram
-    participant Frontend as 前端
-    participant SessionManager as SessionManager
-    participant Memory as llm_history
+    autonumber
+    participant FE as 前端 React
+    participant SM as SessionManager FastAPI
+    participant Mem as llm_history 会话历史
     
-    Frontend->>SessionManager: get_llm_history(session_id)
-    alt 会话存在
-        SessionManager->>Memory: 返回已有历史
-        Memory-->>SessionManager: 历史消息列表
+    FE->>+SM: get_llm_history(session_id)
+    
+    alt 会话已存在
+        SM->>+Mem: 获取已有历史
+        Mem-->>-SM: 返回历史消息
     else 会话不存在
-        SessionManager->>Memory: 创建新会话历史
-        Memory-->>SessionManager: 新历史对象
+        SM->>+Mem: 创建新会话历史
+        Mem-->>-SM: 返回新历史对象
     end
-    SessionManager-->>Frontend: llm_history 对象
     
-    Note over Frontend: session_id 持久化到 localStorage
+    SM-->>-FE: llm_history 对象
+    
+    Note over FE: session_id 持久化到 localStorage
+    
+    FE->>FE: 页面刷新后通过 localStorage 恢复 session_id，继续对话
 ```
 
 ---
@@ -276,7 +319,7 @@ npm run dev
 | **TypeScript** | 严格模式，接口 `I` 前缀，Zustand 全局状态 |
 | **SQL** | 分层命名 `ods_`/`dwd_`/`dws_`/`ads_`，分区字段必含 `dt` |
 
-详见 [project-rules.md](file:///c:/Users/tanshiji/Desktop/Learning%20Summary/AI/agent/auto_report_generate/.trae/rules/project-rules.md)。
+详见 [project-rules.md](./.trae/rules/project-rules.md)。
 
 ---
 
